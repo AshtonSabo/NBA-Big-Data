@@ -253,18 +253,44 @@ public class NBABigData {
         // Assign eWPA values
         df = df.withColumn("eWPA", functions.callUDF("getEwpaValue", df.col("EVENT_TYPE")));
 
-        // Aggregate clutchness scores per player and season type
-        Dataset<Row> playerClutchScores = df.groupBy("PLAYER1_ID", "PLAYER1_NAME", "SEASON_TYPE")
+        // Track points, field goals, and free throw attempts
+        df = df.withColumn("Points_Scored", functions.when(df.col("EVENT_TYPE").equalTo("Made 3-Point Shot"), 3)
+                .when(df.col("EVENT_TYPE").equalTo("Made 2-Point Shot"), 2)
+                .when(df.col("EVENT_TYPE").equalTo("Made Free Throw"), 1)
+                .otherwise(0));
+
+        df = df.withColumn("Field_Goals_Attempted", functions.when(df.col("EVENT_TYPE").equalTo("Made 3-Point Shot"), 1)
+                .when(df.col("EVENT_TYPE").equalTo("Made 2-Point Shot"), 1)
+                .when(df.col("EVENT_TYPE").equalTo("Missed 3-Point Shot"), 1)
+                .when(df.col("EVENT_TYPE").equalTo("Missed Field Goal"), 1)
+                .otherwise(0));
+
+        df = df.withColumn("Free_Throws_Attempted", functions.when(df.col("EVENT_TYPE").equalTo("Getting 1 Foul Shot"), 1)
+                .when(df.col("EVENT_TYPE").equalTo("Getting 2 Foul Shots"), 2)
+                .when(df.col("EVENT_TYPE").equalTo("Getting 3 Foul Shots"), 3)
+                .otherwise(0));
+
+        // Aggregate points scored, FGA, FTA for each player
+        Dataset<Row> playerStats = df.groupBy("PLAYER1_ID", "PLAYER1_NAME", "SEASON_TYPE")
                 .agg(
-                        functions.sum("eWPA").alias("Total_eWPA"),
+                        functions.sum("Points_Scored").alias("Total_Points"),
+                        functions.sum("Field_Goals_Attempted").alias("Total_FGA"),
+                        functions.sum("Free_Throws_Attempted").alias("Total_FTA"),
+                        functions.sum("eWPA").alias("Total_eWPA"), // Keep track of eWPA as before
                         functions.sum(functions.when(functions.col("TEAM_WIN"), 1).otherwise(0)).alias("Total_Wins"),  // Track wins
                         functions.count("TEAM_WIN").alias("Total_Games")  // Track total games played in clutch moments
                 );
 
+        // Calculate TS% for each player
+        playerStats = playerStats.withColumn("TS_Percentage", functions.when(
+                functions.col("Total_FGA").gt(0).and(functions.col("Total_FTA").gt(0)),
+                functions.col("Total_Points").divide(functions.lit(2).multiply(functions.col("Total_FGA").plus(functions.lit(0.44).multiply(functions.col("Total_FTA")))))
+        ).otherwise(functions.lit(0)));  // If there are no field goal attempts or free throw attempts, TS% is 0
+
         // Calculate win percentage for each player
-        playerClutchScores = playerClutchScores.withColumn("Win_Percentage",
+        playerStats = playerStats.withColumn("Win_Percentage",
                 functions.when(functions.col("Total_Games").gt(0), functions.col("Total_Wins").divide(functions.col("Total_Games"))).otherwise(functions.lit(0)));
 
-        return playerClutchScores;
+        return playerStats;
     }
 }
