@@ -115,6 +115,11 @@ public class NBABigData {
 
         df = df.filter(functions.abs(df.col("SCOREMARGIN_INT")).leq(6));
 
+        // Add a column indicating whether the player's team won (for simplicity, assume home team if PLAYER1 is home)
+        df = df.withColumn("TEAM_WIN", functions.when(
+                functions.col("SCOREMARGIN_INT").gt(0), functions.lit(true) // Home team wins
+        ).otherwise(functions.lit(false))); // Away team wins
+
         return df;
     }
 //I NEED TO TEST IF any of the below IS ACTUALLY BEHAVING CORRECTLY
@@ -250,18 +255,15 @@ public class NBABigData {
 
         // Aggregate clutchness scores per player and season type
         Dataset<Row> playerClutchScores = df.groupBy("PLAYER1_ID", "PLAYER1_NAME", "SEASON_TYPE")
-                .agg(functions.sum("eWPA").alias("Total_eWPA"));
+                .agg(
+                        functions.sum("eWPA").alias("Total_eWPA"),
+                        functions.sum(functions.when(functions.col("TEAM_WIN"), 1).otherwise(0)).alias("Total_Wins"),  // Track wins
+                        functions.count("TEAM_WIN").alias("Total_Games")  // Track total games played in clutch moments
+                );
 
-        // Adjust for game importance
-        playerClutchScores = playerClutchScores.withColumn("Adjusted_eWPA", functions.when(
-                functions.col("SEASON_TYPE").equalTo("Regular Season"), functions.col("Total_eWPA")
-        ).when(
-                functions.col("SEASON_TYPE").equalTo("Playoffs"), functions.col("Total_eWPA").multiply(1.5)
-        ).when(
-                functions.col("SEASON_TYPE").equalTo("Finals"), functions.col("Total_eWPA").multiply(2.0)
-        ).otherwise(functions.col("Total_eWPA")));
-
-        // Need to apply last ten second bonus
+        // Calculate win percentage for each player
+        playerClutchScores = playerClutchScores.withColumn("Win_Percentage",
+                functions.when(functions.col("Total_Games").gt(0), functions.col("Total_Wins").divide(functions.col("Total_Games"))).otherwise(functions.lit(0)));
 
         return playerClutchScores;
     }
