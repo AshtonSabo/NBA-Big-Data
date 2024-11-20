@@ -253,7 +253,7 @@ public class NBABigData {
         // Assign eWPA values
         df = df.withColumn("eWPA", functions.callUDF("getEwpaValue", df.col("EVENT_TYPE")));
 
-        // Track points, field goals, and free throw attempts
+        // Track points, field goals, free throw attempts, and turnovers
         df = df.withColumn("Points_Scored", functions.when(df.col("EVENT_TYPE").equalTo("Made 3-Point Shot"), 3)
                 .when(df.col("EVENT_TYPE").equalTo("Made 2-Point Shot"), 2)
                 .when(df.col("EVENT_TYPE").equalTo("Made Free Throw"), 1)
@@ -270,16 +270,39 @@ public class NBABigData {
                 .when(df.col("EVENT_TYPE").equalTo("Getting 3 Foul Shots"), 3)
                 .otherwise(0));
 
-        // Aggregate points scored, FGA, FTA for each player
-        Dataset<Row> playerStats = df.groupBy("PLAYER1_ID", "PLAYER1_NAME", "SEASON_TYPE")
+        df = df.withColumn("Turnovers", functions.when(df.col("EVENT_TYPE").equalTo("Turnover"), 1).otherwise(0));
+
+        // Aggregate points scored, FGA, FTA, and TO for each player
+        Dataset<Row> playerStats = df.groupBy("PLAYER1_ID", "PLAYER1_NAME", "SEASON_TYPE", "TEAM_ID")
                 .agg(
                         functions.sum("Points_Scored").alias("Total_Points"),
                         functions.sum("Field_Goals_Attempted").alias("Total_FGA"),
                         functions.sum("Free_Throws_Attempted").alias("Total_FTA"),
+                        functions.sum("Turnovers").alias("Total_Turnovers"),
                         functions.sum("eWPA").alias("Total_eWPA"), // Keep track of eWPA as before
                         functions.sum(functions.when(functions.col("TEAM_WIN"), 1).otherwise(0)).alias("Total_Wins"),  // Track wins
                         functions.count("TEAM_WIN").alias("Total_Games")  // Track total games played in clutch moments
                 );
+
+        // Calculate team stats (Team's FGA, FTA, TO)
+        Dataset<Row> teamStats = df.groupBy("TEAM_ID")
+                .agg(
+                        functions.sum("Field_Goals_Attempted").alias("Team_FGA"),
+                        functions.sum("Free_Throws_Attempted").alias("Team_FTA"),
+                        functions.sum("Turnovers").alias("Team_Turnovers")
+                );
+
+        // Join player stats with team stats
+        playerStats = playerStats.join(teamStats, "TEAM_ID", "left");
+
+        // Calculate Usage Rate for each player
+        playerStats = playerStats.withColumn("Usage_Rate", functions.when(
+                functions.col("Total_FGA").gt(0).and(functions.col("Team_FGA").gt(0)),
+                functions.multiply(functions.lit(100), functions.divide(
+                        functions.col("Total_FGA").plus(functions.lit(0.44).multiply(functions.col("Total_FTA"))).plus(functions.col("Total_Turnovers")),
+                        functions.col("Team_FGA").plus(functions.lit(0.44).multiply(functions.col("Team_FTA"))).plus(functions.col("Team_Turnovers"))
+                ))
+        ).otherwise(functions.lit(0)));  // If no field goal attempts or team stats, usage rate is 0
 
         // Calculate TS% for each player
         playerStats = playerStats.withColumn("TS_Percentage", functions.when(
