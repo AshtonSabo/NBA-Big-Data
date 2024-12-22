@@ -394,8 +394,8 @@ public class NBABigData {
         Dataset<Row> playerClutchScores = df.groupBy("PLAYER_ID", "PLAYER_NAME", "SEASON_TYPE")
                 .agg(functions.sum("eWPA").alias("Total_eWPA"));
 
-        // Adjust for game importance
-        playerClutchScores = playerClutchScores.withColumn("Adjusted_eWPA", functions.when(
+        // Adjust for game importance FiX tHiS laTER
+       /* playerClutchScores = playerClutchScores.withColumn("Adjusted_eWPA", functions.when(
                 functions.col("SEASON_TYPE").equalTo("Regular Season"), functions.col("Total_eWPA")
         ).when(
                 functions.col("SEASON_TYPE").equalTo("Playoffs"), functions.col("Total_eWPA").multiply(1.5)
@@ -405,7 +405,7 @@ public class NBABigData {
 
         return playerClutchScores;
     }
-
+*/
     private static Dataset<Row> assignEwpaToPlayers(Dataset<Row> df) {
         // Assign eWPA to PLAYER1 for shots, free throws, rebounds, and turnovers
         df = df.withColumn("PLAYER1_eWPA", functions.when(
